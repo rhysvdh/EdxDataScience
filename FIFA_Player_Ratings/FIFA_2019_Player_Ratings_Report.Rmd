@@ -1,0 +1,981 @@
+---
+title: "FIFA 19 Player Ratings Report"
+author: "Rhys van den Handel"
+date: "01/01/2021"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r, include=FALSE}
+
+options(tinytex.verbose = TRUE)
+##########################################################
+# PACKAGE LOADING
+##########################################################
+
+if(!require(tidyverse)) install.packages("tidyverse", repos = "http://cran.us.r-project.org")
+if(!require(caret)) install.packages("caret", repos = "http://cran.us.r-project.org")
+if(!require(data.table)) install.packages("data.table", repos = "http://cran.us.r-project.org")
+if(!require(gsubfn)) install.packages("gsubfn", repos = "http://cran.us.r-project.org")
+if(!require(stringr)) install.packages("stringr", repos = "http://cran.us.r-project.org")
+if(!require(dplyr)) install.packages("dplyr", repos = "http://cran.us.r-project.org")
+
+library(tidyverse)
+library(caret)
+library(data.table)
+library(gsubfn)
+library(stringr)
+library(dplyr)
+```
+
+## Executive Summary
+
+Every year EA sports releases the latest version FIFA. FIFA is a soccer video game available on most popular platforms that allows users to control players against other users or the computer. Released in September 2018, FIFA 19 contains over 18000 players from 205 clubs from around the world. When defining a players capability many aspects are taken into consideration. These aspects are broken down into attributes such as shooting power, goalkeeper diving and dribbling which are given a score out of 100. The attributes are then combined based on the position of the player to give an overall score. 
+
+The attribute scores are determined by EA sports using thier own method. The purose of this project was to build a system that can recommend an overall score to players based on factors that are known or are easy to determine. This was achieved by investigating the data that exists in the FIFA 19 player database. 
+
+After analysing the data, choosing variables that can be easily found or simply assigned,  a complex regularisation model was built utilising as much information as possible to make informed decissions. The final result was evaluated using the RMSE method in conjunction with mean absolute error. 
+
+The final model used 10 variables split into 4 groups. Where possible the analysis was run through the Caret glm method and where not possible a penalty term optimised regularisation was done. While the individual models worked, the combined model made much better predictions and resulted in an RMSE of ~ 4.0 and a mean absolute error of ~ 2.8. The model had difficulty predicting outliers and for this reason the model should only be used to inform on ratings where the complex FIFA data is unavailable. 
+
+
+\newpage
+
+## 1. Introduction
+
+The HarvardX data science certificate takes part over 9 Courses. This is the final Capstone project for individual learners. The project is a recommendation system chosen by the learner on any dataset. For this project FIFA 19 player data was chosen. The purpose is to take information on players and predict the overall ability out of 100 of the player. 
+
+EA Sports releases a new FIFA video game every year. This system looks at the FIFA 19 player dataset only. The dataset contains over 18000 players from more than 200 clubs around the world. There are 89 variables that FIFA uses to describe a player and thier ability. However, many of these attributes are complex based on FIFA's rating system. Some of the data FIFA uses to make decisions on a players ability is limited. Therefore, deriving an overall rating for a player may be difficult and cum
+bersome.
+
+This project looks at variables that can be found easily or easily derived (value out of 5 vs value out of 100) and uses this to predict the overall rating of the player. 
+
+### 1.1 FIFA Players Dataset
+
+The FIFA players dataset is a single repository of player data. It contains 89 variables which are used to describe each player. Players are identified by a unique ID. The variables can be broken into simple groups of information used for describing the player
+
+1. Physical
+  + Age
+  + Height
+  + Weight
+  + Body.Type
+
+2. General
+  + Nationality
+  + Club
+  + Jersey.Number
+
+3. Simple Attributes
+  + Special
+  + Preferred.Foot
+  + International.Reputation
+  + Weak.Foot
+  + Skill.Moves
+  + Work.Rate
+  + Position
+
+4. Monetary Values
+  + Value
+  + Wage
+  + Release.Clause
+
+5. Complex Attributes
+  + All skill ratings
+  + Adjustment for position
+  + Picturs and Logos
+
+All of these variables feed into the overall and potetntial rating of each player. 
+
+
+### 1.2 Limitations
+
+As discussed earlier the complex attributes will not be used to make any jugements on the overall rating of each player. This is due to FIFA using the complex skill ratings out of 100 to directly inform the overall rating. These are complex and are created by FIFA based on expert opinion and known complex statistics. This project will only look at attributes from the first 4 groups mentioned in the section above.
+
+This project has been run on a middle of the range laptop. For the purpose of simplicity all numeric grouped values will be evaluated using the same method of glm. The model was built on each individual group and combined at the end to save on processing. This resulted in the final combined model not being as effective as a single combined and trained model. 
+
+### 1.3 Evaluation Method
+
+"The RMSE is a quadratic scoring rule which measures the average magnitude of the error. The equation for the RMSE is given in both of the references. Expressing the formula in words, the difference between forecast and corresponding observed values are each squared and then averaged over the sample. Finally, the square root of the average is taken. Since the errors are squared before they are averaged, the RMSE gives a relatively high weight to large errors. This means the RMSE is most useful when large errors are particularly undesirable." - http://www.eumetrain.org
+
+As described by eumetrain.org RMSE penalizes high errors. This makes it an ideal evaluation method for recommendation systems. A lower RMSE means that there is a lower likelihood of a very poor recommendation being made which could result in a player been grosely over or under rated. 
+
+The accuracy of each model will by evaluated using Mean Absolute Error the following formula: | mean(prediction - actual)|. The RMSE indicated the quality of the model however, the absolute error will show the true value of the errors vs the overall score. 
+
+\newpage
+
+## 2. Methodology
+
+The methodology used to evaluate the project is shown and discussed bellow:
+
+### 2.1 Data Import
+
+The data has been made available on Kaggle.com by user Karan Gadiya. The dataset can be found at the following link: *"https://www.kaggle.com/karangadiya/fifa19"* The data is downloaded into the project in a csv format and run to create the PlayerData set.
+
+The dataset has approximately 60 rows containing NA's these are removed. The data is then loaded into a working and validation set based on a split of 10%. A seed of 1 is used to ensure consistency with each run and to allow any users to test the model on the same data. 
+
+### 2.2 Data Analysis
+
+The data analysis allows for a better understanding of the data components and their interactions. The process of running the data analysis was primarily to determine the usability of each attribute listed in section 1.1. The key analysis variables were the impact on overall rating and the count of each group. The following was investigated:
+
+1. FIFA dataset
+  + view the data
+  + check for nulls
+  + Distribution of Player Ratings
+  
+2. Physical
+  + Age
+    - Distribution of ages
+    - Number of players and mean rating by age
+  + Height and Weight
+    - Convert to numeric values
+    - Distributions of height and weight
+    - Height and weight vs overall rating
+  + Body.Type
+    - plot gainst overall 
+
+3. General
+  + Nationality
+    - Summary of counts
+    - Countries with most and least players
+    - Countries with best and worst Players
+  + Club
+    - Summary of counts
+    - Clubs with most and least players
+    - Clubs with best and worst Players
+  + Jersey.Number
+    - Summary of counts
+    - Jersey numbers with most and least players
+    - Jersey numbers Clubs with best and worst Players
+    - Plot of number vs average rating
+    
+4. Simple Attributes
+  + Test for quantifyability
+  + Plot against overall
+  
+5. Monetary Columns
+  + Fix leading characters to make numeric variable
+  + Plot each monetary attribute against overall rating
+  
+The purpose of the data analysis would be to allow for informed data cleaning decisions that would have a positive outcome on the final results. The data cleaning was used as part of the predictive model as discussed in section 2.3 bellow. The analysis showed which attributes were suitable for the model and which were to be excluded from the model.
+
+### 2.3 Predictive Model
+
+Due to the limitations discussed in section 1.2 *Limitations* above the predictive model was built in sections based on the classification of data. The model was built using simple glm methods and regularisation for non-numeric or non-linear models.
+
+#### 2.3.1 Splitting Data
+
+The data was cleaned according to the analysis made. It was then split into a training and testing set. The partition is 10% this allows for a large proportion of training data. This was due to the small numbers of players per jersey number and clubs. Ensuring a good fit can be made. 
+
+#### 2.3.2 Prediction Models
+
+As introduced the the model was built from a simplified groups and combined into more complex model:
+
+* Mean Model:
+  + Using the simple mean of the dataset
+  + The mean model serves only to ensure the models offer an improvemnt to the overall prediction.
+* Caret GLM Model:   
+  + Using caret train with a GLM method on linear numeric columns per group
+* Regularization model:
+  + Using a penalty term regularise non numeric and non-linear attributes
+  + Optimized for the best penalty term
+* Combined Model:   
+  + Combine the models
+  + Retune the regularisation models for optimised output
+
+### 2.4 Validation
+
+Once an acceptable RMSE has been identified the final iteration would be the validation, run through the final combined model.
+
+\newpage
+
+## 3. Results and Discussion
+
+This sections presents the results of the methodology. 
+
+### 3.1 Data Import and Preparation
+
+```{r import}
+
+##########################################################
+# LOAD DATA
+##########################################################
+
+#Download Data from internet
+#temp <- tempfile()
+
+#url <- "https://www.kaggle.com/karangadiya/fifa19/download/archive.zip"
+#download.file(url, temp)
+#unzip(temp, "archive")
+#data<-read.csv("/archive/data.csv", header = TRUE)
+
+#unlink(temp)
+
+
+#Read the data in from project
+data <- read.csv(".\\data.csv", header = TRUE)
+
+
+#Replace data with readcsv for using project dataset
+PlayerData <- data.frame(data)
+
+#view the dataset
+head(PlayerData)
+any(is.na(PlayerData)) #True: therefore there are NA's
+nrow(PlayerData) # 18207
+
+#Remove the NA's
+PlayerData <- PlayerData %>% drop_na()
+nrow(PlayerData) # 18147 Therefore, only 60 rows dropped
+```
+
+Due to the data containing nulls, the nulls were removed. This elimitnated 60 rows (0.3%) of the data
+
+```{r load}
+
+##########################################################
+# LOAD INTO WORKING AND VALIDATION SET
+##########################################################
+
+# Validation set will be 10% of the dataset
+set.seed(1, sample.kind="Rounding")
+
+test_index <- createDataPartition(y = PlayerData$Overall, times = 1, p = 0.1, list = FALSE)
+players <- PlayerData[-test_index,]
+validation <- PlayerData[test_index,]
+
+```
+
+The data was then split into a working and validation dataset.
+
+\newpage
+
+### 3.2 Data Analysis
+
+Data exploration was an integral portion of the project this was to ensure the variables chosen for the model would be correct and useful. 
+
+#### 3.2.1 FIFA Dataset
+
+```{r analysis 1.1}
+
+#Checking the players data set
+names(players)
+
+head(players)
+any(is.na(players))
+```
+
+The datset contains many attributes however, most are complex. These columns will be removed and not selected for analysis. There are no nulls in the dataset.
+
+```{r analysis 1.2, echo=FALSE}
+#Distribution of player ratings
+hist(players$Overall)
+
+```
+
+The distribution of player ratings is normal. This is ideal for the purpose of this project. 
+
+```{r analysis 1.3, echo=FALSE}
+#Summary statistics of rating
+summary(players$Overall)
+
+```
+
+The summary statistics indicate the mean and median of 66 as well as a small interquartile range. 
+
+
+#### 3.2.2 Physical
+
+The physical attributes were broken down as follows:
+
+```{r analysis 2.1, echo=FALSE}
+#Distribution of player ages
+hist(players$Age)
+
+```
+
+Although not perfectly normal there is a decent shape to the distribution of ages.
+
+```{r analysis 2.2, echo=FALSE}
+ages <- players %>% group_by(Age) %>%
+  summarize(n=n(),mean_rate=mean(Overall))
+
+#Plot of number of players and average rating by age
+ages %>% ggplot(aes(x=Age)) +
+  geom_point(aes(y=n/20), color="blue") +
+  geom_point(aes(y=mean_rate), color="red")+
+  scale_y_continuous(name = "Mean Rating",sec.axis = sec_axis(~.*20, name="Number Players")) +
+  ggtitle("Average Ratings and Number of Players by Age")
+
+```
+
+There is a clear relationship between age and mean rating. However, this is slightly affected by low volumes of older players resulting in slight variance. 
+
+```{r analysis 2.3, echo=FALSE}
+hwcols <-  c("Name","Age","Overall","Height","Weight","Body.Type")
+hw <- players %>% select(hwcols)
+temp <- hw %>% mutate(Weight=as.numeric(str_sub(Weight,1,-4)),ft=as.numeric(str_sub(Height,1,1)),inc=as.numeric(str_sub(Height,3,-1)))
+hw <- temp %>% mutate(Height=((inc*0.0254)+(ft*0.3048))) %>% select(hwcols)
+
+#Distribution of height and weight
+hist(hw$Height)
+hist(hw$Weight)
+
+#Height and Weight vs Rating
+
+hw_rating <- hw %>% group_by(Overall) %>%
+  summarize(n=n(),height=mean(Height),weight=mean(Weight))
+
+hw_rating %>%  ggplot(aes(x=Overall)) +
+  geom_point(aes(y=weight/100), color="blue") +
+  geom_point(aes(y=height), color="red")+
+  scale_y_continuous(name = "Mean Height (Red)",sec.axis = sec_axis(~.*100, name="Mean weight (Blue)")) +
+  ggtitle("Average Height and Weight of Players by Rating")
+
+```
+
+Both height and weight are nicely distributed. However, only weight has any correlation to overall rating. Therefore height will be excluded from the model. In order to utilise weight effectively weight must be converted to a numeric column for the model.
+
+```{r analysis 2.4, echo=FALSE}
+boxplot(hw$Overall~hw$Body.Type)
+
+```
+
+As shown there is no correlation or identifiable impact to body type. therefore body type will be excluded from the model.
+
+#### 3.2.3 General
+
+```{r analysis 3.1}
+nation <- players %>% group_by(Nationality) %>%
+  summarize(n=n(),rating=mean(Overall)) 
+
+summary(nation$n)
+
+#Nations with most players
+nation %>% arrange(desc(n)) %>%
+  top_n(10,n)
+
+#Nations with least players
+nation %>% arrange((n)) %>%
+  top_n(10,-n)
+
+#Nations with best players
+nation %>% filter(n>12) %>%
+  arrange(desc(rating)) %>%
+  top_n(10,rating)
+
+#Nations with worst players
+nation %>% filter(n>12) %>%
+  arrange((rating)) %>%
+  top_n(10,-rating)
+```
+Nationality has an impact but due to the inconsistent number of players of each nation it would be difficult to use. Therefore nationality will be excluded from the model.
+
+```{r analysis 3.2}
+clubs <- players %>% group_by(Club) %>%
+  summarize(n=n(),rating=mean(Overall)) 
+
+summary(clubs$n)
+
+#Clubs with most players
+clubs %>% arrange(desc(n)) %>%
+  top_n(10,n)
+
+#Clubs with least players
+clubs %>% arrange((n)) %>%
+  top_n(10,-n)
+
+#Clubs with best players
+clubs %>% arrange(desc(rating)) %>%
+  top_n(10,rating)
+
+#Clubs with worst players
+clubs %>% arrange((rating)) %>%
+  top_n(10,-rating)
+
+
+```
+
+Clubs are definitely a good option for training there is a clear difference between clubs and the number of players is fairly consistent
+
+```{r analysis 3.3}
+Jersey <- players %>% group_by(Jersey.Number) %>%
+  summarize(n=n(),rating=mean(Overall)) 
+
+summary(Jersey$n)
+
+#Clubs with most players
+Jersey %>% arrange(desc(n)) %>%
+  top_n(10,n)
+
+#Clubs with least players
+Jersey %>% arrange((n)) %>%
+  top_n(10,-n)
+
+#Clubs with best players
+Jersey %>% arrange(desc(rating)) %>%
+  top_n(10,rating)
+
+#Clubs with worst players
+Jersey %>% arrange((rating)) %>%
+  top_n(10,-rating)
+
+```
+
+Jersey Numbers are a good option for training. However, due to non linearity regularization should be used and not the GLM method.
+
+
+#### 3.2.4 Simple
+
+As each of the simple attributes are so minimalistic boxplots will be used to quanitify them. Special and Work rate are difficult to quantify and therefore will be exluded from the model.
+
+```{r analysis 4.1, echo=FALSE}
+pscols <-  c("Name","Age","Overall","Special","International.Reputation","Weak.Foot","Skill.Moves","Work.Rate","Position")
+ps <- players %>% select(pscols)
+
+
+boxplot(ps$Overall~ps$Position)
+
+```
+
+Position does not have a set effect and has high variability in overall making it not very useful. Therefore position was excluded from the model
+
+```{r analysis 4.2, echo=FALSE}
+boxplot(ps$Overall~ps$International.Reputation)
+
+```
+
+International reputation has a good correlation to overall and was used.
+
+```{r analysis 4.3, echo=FALSE}
+boxplot(ps$Overall~ps$Weak.Foot)
+
+```
+
+Although weak foot does not have a strong correlation, a correlation exists. Therefore, weak foot will be used.
+```{r analysis 4.4, echo=FALSE}
+boxplot(ps$Overall~ps$Skill.Moves)
+
+```
+
+Skill moves have a decent correlation to overall and was used.
+
+
+#### 3.2.5 Monetary
+
+Money is a big driver in football therefore strong correlation to overall rating is expected.
+
+```{r analysis 5.1, echo=FALSE}
+moncols <- c("Name","Age","Overall","Value","Wage","Release.Clause")
+
+money <- players %>% select(moncols)
+temp <- money %>% mutate(value_unit=(str_sub(Value,-1,-1)),value_euro=as.numeric(str_sub(Value,4,-2)),wage_unit=(str_sub(Wage,-1,-1)),wage_euro=as.numeric(str_sub(Wage,4,-2)),release_unit=(str_sub(Release.Clause,-1,-1)),release_euro=as.numeric(str_sub(Release.Clause,4,-2)))
+money <- temp %>% mutate(Value=ifelse(value_unit=="K",value_euro*1000,value_euro*1000000),Wage=ifelse(wage_unit=="K",wage_euro*1000,wage_euro*1000000),Release.Clause=ifelse(release_unit=="K",release_euro*1000,release_euro*1000000)) %>%
+  select(moncols)
+money[is.na(money)] <- 0
+
+
+money_rating <- money %>% group_by(Overall) %>%
+  summarize(n=n(),value=mean(Value),wage=mean(Wage),release=mean(Release.Clause))
+
+plot(money_rating$Overall,money_rating$wage)
+plot(money_rating$Overall,money_rating$value)
+plot(money_rating$Overall,money_rating$release)
+```
+
+As expected all Monetary values have a large impact. specifically at higher overall ratings where there is a stronger correlation..
+The monetary columns have leading characters that need to be removed so that they can be turned into numeric columns. This also includes converting from thousands and millions into base 1. 
+
+\newpage
+
+### 3.3 Predictive Model
+
+Based on the analysis performed above there was sufficent evidence to sugget that a predictive model can be built on the available data. The analysis revealed that some of the columns needed changing to the formatting. This was performed before the model was built. The model was then built and trained as follows:
+
+#### 3.3.1 Data Split
+
+```{r model 1.1}
+##########################################################
+# DATA PREPARATION
+##########################################################
+
+
+#--- Columns to be used ---
+
+header <- c("Name","Age","Overall","Weight","Value","Wage","Release.Clause","International.Reputation","Weak.Foot","Skill.Moves","Club","Jersey.Number")
+
+players <- players %>% select(header)
+validation <- validation %>% select(header)
+#--- players data set ---
+
+#Fix monetary formatting
+
+
+temp <- players %>% mutate(value_unit=(str_sub(Value,-1,-1)),value_euro=as.numeric(str_sub(Value,4,-2)),wage_unit=(str_sub(Wage,-1,-1)),wage_euro=as.numeric(str_sub(Wage,4,-2)),release_unit=(str_sub(Release.Clause,-1,-1)),release_euro=as.numeric(str_sub(Release.Clause,4,-2)))
+players <- temp %>% mutate(Value=ifelse(value_unit=="K",value_euro*1000,value_euro*1000000),Wage=ifelse(wage_unit=="K",wage_euro*1000,wage_euro*1000000),Release.Clause=ifelse(release_unit=="K",release_euro*1000,release_euro*1000000)) %>%
+  select(header)
+
+temp <- validation %>% mutate(value_unit=(str_sub(Value,-1,-1)),value_euro=as.numeric(str_sub(Value,4,-2)),wage_unit=(str_sub(Wage,-1,-1)),wage_euro=as.numeric(str_sub(Wage,4,-2)),release_unit=(str_sub(Release.Clause,-1,-1)),release_euro=as.numeric(str_sub(Release.Clause,4,-2)))
+validation <- temp %>% mutate(Value=ifelse(value_unit=="K",value_euro*1000,value_euro*1000000),Wage=ifelse(wage_unit=="K",wage_euro*1000,wage_euro*1000000),Release.Clause=ifelse(release_unit=="K",release_euro*1000,release_euro*1000000)) %>%
+  select(header)
+
+#Fix weight format
+
+temp <- players %>% mutate(Weight=as.numeric(str_sub(Weight,1,-4)))
+players <- temp %>% select(header)
+
+temp <- validation %>% mutate(Weight=as.numeric(str_sub(Weight,1,-4)))
+validation <- temp %>% select(header)
+
+#Ensure N/As are set as 0
+players[is.na(players)] <- 0
+validation[is.na(validation)] <- 0
+
+#--- View Data set ---
+
+#players
+head(players)
+nrow(players) #Should be 16331
+any(is.na(players))
+
+# validation
+head(validation)
+nrow(validation) #Should be 1816
+any(is.na(validation))
+
+
+#--- Clear Memory ---
+rm(ages,clubs,hw,hw_rating,money,money_rating,nation,PlayerData,ps,readcsv,temp,Jersey)
+
+##########################################################
+# LOAD INTO TEST AND TRAIN DATA
+##########################################################
+
+# Test set will be 10% of the dataset
+set.seed(1, sample.kind="Rounding")
+
+test_index <- createDataPartition(y = players$Overall, times = 1, p = 0.1, list = FALSE)
+train_set <- players[-test_index,]
+test_set <- players[test_index,]
+
+
+```
+
+The monetary and weight columns were succesfully converted to numeric columns. Any NA's due to failed conversion were set to zero. The model was then split into a training set and 10% test set. 
+
+```{r model 1.2, echo=FALSE}
+
+##########################################################
+# BASIC STATISTICS
+##########################################################
+
+summary(train_set$Overall)
+mu <- mean(train_set$Overall)
+med <- median(train_set$Overall)
+```
+
+The besic statistics were checked and align well to the statistics from the analysis section showing the split was a good split of the data and the training will be representitive. 
+
+
+#### 3.3.2 Mean Model
+
+The purpose of the mean model is to set a benchmark for the rest of the predictive model
+
+```{r model 2}
+
+#Running an RMSE on mean
+RMSE_mu <- sqrt(mean((test_set$Overall-mu)^2))
+RMSE_mu
+
+#Absolute Error
+AbsError_mu <- mean(abs(mu-test_set$Overall))
+AbsError_mu
+```
+
+This will now be the RMSE and absolute error to aim to improve on for the rest of the model components and the combined final model
+
+#### 3.3.3 Caret GLM Model
+
+The Caret GLM model used the caret train to fit a glm model to the data. This then informs a prediction based on testing data which is evaluated against the expecetd result.
+
+```{r model 3.1}
+
+#--- AGE AND WEIGHT PREDICTION------------------------------#
+
+#run a GLM
+fit_aw <- train(Overall~Age+Weight,data=train_set, method = "glm")
+
+train_pred_aw <-predict(fit_aw,train_set)
+pred_aw <-predict(fit_aw,test_set)
+
+RMSE_aw <- sqrt(mean((test_set$Overall-pred_aw)^2))
+RMSE_aw
+
+#Absolute Error
+AbsError_aw <- mean(abs(pred_aw-test_set$Overall))
+AbsError_aw
+```
+
+The physical attributes tested with the glm are age and weight. The final RMSE is slightly better than the mean. the absolute error is nearly 1 better than the mean indicating that this method works well on the middle range ratings but there are many outliers which are responsible for the high RMSE. 
+
+```{r model 3.2}
+
+#--- SKILL, WEAK FOOT AND REPUTATION PREDICTION ----------#
+
+#run a GLM
+fit_swr <- train(Overall~Skill.Moves+Weak.Foot+International.Reputation,data=train_set, method = "glm")
+
+train_pred_swr <-predict(fit_swr,train_set)
+pred_swr <-predict(fit_swr,test_set)
+
+RMSE_swr <- sqrt(mean((test_set$Overall-pred_swr)^2))
+RMSE_swr
+
+#Absolute Error
+AbsError_swr <- mean(abs(pred_swr-test_set$Overall))
+AbsError_swr
+```
+
+The simple attributes tested through glm are Skill moves, Weak foort and International Reputation. the strong correlation from reputation and skill moves allows this model to predict better than the physical attributes. 
+
+```{r model 3.3}
+
+#--- MONETARY PREDICTION ------------------------------#
+
+#run a GLM
+fit_mon <- train(Overall~Value + Wage + Release.Clause,data=train_set, method = "glm")
+
+train_pred_mon <-predict(fit_mon,train_set)
+pred_mon <-predict(fit_mon,test_set)
+
+#Running an RMSE to view the error
+RMSE_mon_glm <- sqrt(mean((test_set$Overall-pred_mon)^2))
+RMSE_mon_glm
+
+#Absolute Error
+AbsError_mon <- mean(abs(pred_mon-test_set$Overall))
+AbsError_mon
+```
+
+As expected the monetary glm gave the most accurate result and lowest RMSE of the three Caret predition models. The monetary glm used Value, Wage and release clause to determine the predicted values. 
+
+#### 3.3.4 Regularisation
+
+Regularisation is used to predict the general items club and jersey number. 
+
+```{r model 4.1}
+
+#--- Club -----------------------------------------------#
+
+#Create the regularized for sum and mean
+club <- train_set %>% group_by(Club) %>%
+  summarize(n=n(),rsum=sum(Overall-mu))
+
+t_club <- test_set %>% left_join(club,by='Club')
+train_club <- train_set %>% left_join(club,by='Club')
+
+#Sample size regularization accounting for sample size n
+t_club <- t_club %>% mutate(b_club=rsum/n)
+
+RMSE_club_nopen <- sqrt(mean((test_set$Overall-(mu+t_club$b_club))^2))
+RMSE_club_nopen
+
+#regularization optimized with penalty term p
+p <- seq(-10,20)
+
+#sapply the terms
+RMSEs <- sapply(p,function(p){
+  club <- club %>% mutate(b_club=rsum/(n+p))
+  train_club <- train_set %>% left_join(club,by='Club')
+  sqrt(mean((train_set$Overall-(mu+train_club$b_club))^2))
+})
+
+#plot outputs
+plot(p,RMSEs)
+
+#Improve accuracy
+p <- seq(-5,5,0.2)
+
+#sapply the terms
+RMSEs <- sapply(p,function(p){
+  club <- club %>% mutate(b_club=rsum/(n+p))
+  train_club <- train_set %>% left_join(club,by='Club')
+  sqrt(mean((train_set$Overall-(mu+train_club$b_club))^2))
+})
+
+#plot outputs
+plot(p,RMSEs)
+
+p_club <- p[which.min(RMSEs)]
+
+#final optimized output
+t_club <- t_club %>% mutate(b_club=rsum/(n+p_club))
+
+RMSE_club <- sqrt(mean((test_set$Overall-(mu+t_club$b_club))^2))
+RMSE_club
+
+#Absolute Error
+AbsError_club <- mean(abs((mu+t_club$b_club)-test_set$Overall))
+AbsError_club
+```
+
+The regularisation of clubs has an effect. Interestingly when optimised for a penalty term the best penalty is 0 indicating that the mean club score results in the best prediction. 
+
+```{r model 4.2}
+#--- Jersey Number -----------------------------------------------#
+
+#Create the regularized for sum and mean
+Jersey <- train_set %>% group_by(Jersey.Number) %>%
+  summarize(n=n(),rsum=sum(Overall-mu))
+
+t_jersey <- test_set %>% left_join(Jersey,by='Jersey.Number')
+train_jn <- train_set %>% left_join(Jersey,by='Jersey.Number')
+
+#Sample size regularization accounting for sample size n
+t_jersey <- t_jersey %>% mutate(b_jersey=rsum/n)
+
+RMSE_jn_nopen <- sqrt(mean((test_set$Overall-(mu+t_jersey$b_jersey))^2))
+RMSE_jn_nopen
+
+#regularization optimized with penalty term p
+p <- seq(-10,20)
+
+#sapply the terms
+RMSEs <- sapply(p,function(p){
+  Jersey <- Jersey %>% mutate(b_jersey=rsum/(n+p))
+  train_jn <- train_set %>% left_join(Jersey,by='Jersey.Number')
+  sqrt(mean((train_set$Overall-(mu+train_jn$b_jersey))^2))
+})
+
+#plot outputs
+plot(p,RMSEs)
+
+#Improve accuracy
+p <- seq(-1,5,0.2)
+
+#sapply the terms
+RMSEs <- sapply(p,function(p){
+  Jersey <- Jersey %>% mutate(b_jersey=rsum/(n+p))
+  train_jn <- train_set %>% left_join(Jersey,by='Jersey.Number')
+  sqrt(mean((train_set$Overall-(mu+train_jn$b_jersey))^2))
+})
+
+#plot outputs
+plot(p,RMSEs)
+
+p_jersey <- p[which.min(RMSEs)]
+
+#final optimized output
+t_jersey <- t_jersey %>% mutate(b_jersey=rsum/(n+p_jersey))
+
+RMSE_jn <- sqrt(mean((test_set$Overall-(mu+t_jersey$b_jersey))^2))
+RMSE_jn
+
+#Absolute Error
+AbsError_jn <- mean(abs((mu+t_jersey$b_jersey)-test_set$Overall))
+AbsError_jn
+```
+
+Again the optimised penalty term is 0. This is likely to change in the combined model. However, the RMSE of jersey is only marginally better than the mean. This model is not the best one.
+
+#### 3.3.5 Combined
+
+```{r model 5.1}
+#Create b_sum to hold all previous prediction values for tuning
+b_sum = train_pred_mon
+
+#Combine monetary and age weight values (Note these already contain mu)
+train_b_sum = (train_pred_mon + train_pred_aw + train_pred_swr)/3
+b_sum = (pred_mon + pred_aw + pred_swr)/3
+
+#Using a more powerful computer to run all
+fit_glm <- train(Overall~Age+Weight+Skill.Moves+Weak.Foot+International.Reputation+Value + Wage + Release.Clause,data=train_set, method = "glm")
+
+train_b_sum <-predict(fit_glm,train_set)
+b_sum <-predict(fit_glm,test_set)
+
+#Results of the glm combined
+RMSE_glm <- sqrt(mean((test_set$Overall-b_sum)^2))
+RMSE_glm
+
+#Absolute Error
+AbsError_glm <- mean(abs(b_sum-test_set$Overall))
+AbsError_glm
+
+#COMBINE CLUB INTO MODEL WITH TUNING
+
+#regularization optimized with penalty term p
+p <- seq(0,90)
+
+#sapply the terms
+RMSEs <- sapply(p,function(p){
+  club <- club %>% mutate(b_club=rsum/(n+p))
+  train_club <- train_set %>% left_join(club,by='Club')
+  sqrt(mean((train_set$Overall-(train_b_sum+train_club$b_club))^2))
+})
+
+#plot outputs
+plot(p,RMSEs)
+
+p_club <- p[which.min(RMSEs)]
+
+#final optimized output
+t_club <- t_club %>% mutate(b_club=rsum/(n+p_club))
+train_club <- train_club %>% mutate(b_club=rsum/(n+p_club))
+
+b_sum=b_sum+t_club$b_club
+train_b_sum=train_b_sum+train_club$b_club
+
+#COMBINE Jersey Number INTO MODEL WITH TUNING
+
+#regularization optimized with penalty term p
+p <- seq(1000,2000)
+
+#sapply the terms
+RMSEs <- sapply(p,function(p){
+  Jersey <- Jersey %>% mutate(b_jersey=rsum/(n+p))
+  train_jn <- train_set %>% left_join(Jersey,by='Jersey.Number')
+  sqrt(mean((train_set$Overall-(train_b_sum+train_jn$b_jersey))^2))
+})
+
+#As the sequence gets larger the accuracy improvement is less effective therefore will not be used.
+
+#plot outputs
+plot(p,RMSEs)
+
+p_jersey <- p[which.min(RMSEs)]
+
+#final optimized output
+t_jersey <- t_jersey %>% mutate(b_jersey=rsum/(n+p_jersey))
+train_jn <- train_jn %>% mutate(b_jersey=rsum/(n+p_jersey))
+
+b_sum=b_sum+t_jersey$b_jersey
+train_b_sum=train_b_sum+train_jn$b_jersey
+
+RMSE_combined <- sqrt(mean((test_set$Overall-b_sum)^2))
+RMSE_combined
+
+#Combined Error
+AbsError_combined <- mean(abs(b_sum-test_set$Overall))
+AbsError_combined
+
+#Accuracy of prediction
+acc <- round(b_sum,0) == test_set$Overall
+mean(acc)*100
+
+#Distribution of error
+Error_Combined <-b_sum-test_set$Overall
+hist(Error_Combined)
+```
+
+As predicted the tuning optimisation for both clubs and jerseys was required in the final model. The combined RMSE and absolute error show a substantial and adequate improvement from the mean model results. This is ideal and shows that the models are best when applied together. 
+
+#### 3.3.6 Results
+
+```{r model 5.3}
+#Accuracy of prediction
+acc <- round(b_sum,0) == test_set$Overall
+mean(acc)*100
+```
+
+When testing the accuracy of the final model. this is done by testing to see what portion of results lie within +-0.5 of the actual overall rating. Therefore at a 99% test the accuracy of the model is ~13%. This can be expecetd as the mean absolute error is 2.8 but RMSE of 4 meaning there are more outliers as shown by the histogram below: 
+
+```{r model 5.4, echo=FALSE}
+#Distribution of error
+Error_Combined <-b_sum-test_set$Overall
+hist(Error_Combined)
+```
+
+The final results from each model and the combined model are: 
+
+```{r model 5.5, echo=FALSE}
+#Build results table
+results_table <- data.frame(Method='Mean Prediction', RMSE = RMSE_mu ,Error = AbsError_mu)
+results_table <- bind_rows(results_table,data.frame(Method='Physical Prediction', RMSE = RMSE_aw ,Error = AbsError_aw))
+results_table <- bind_rows(results_table,data.frame(Method='Club Prediction', RMSE = RMSE_club ,Error = AbsError_club))
+results_table <- bind_rows(results_table,data.frame(Method='Jersey Number Prediction', RMSE = RMSE_jn ,Error = AbsError_jn))
+results_table <- bind_rows(results_table,data.frame(Method='Simple Attributes Prediction', RMSE = RMSE_swr ,Error = AbsError_swr))
+results_table <- bind_rows(results_table,data.frame(Method='Monetary Prediction', RMSE = RMSE_mon_glm ,Error = AbsError_mon))
+results_table <- bind_rows(results_table,data.frame(Method='Combined GLM Results', RMSE = RMSE_glm,Error = AbsError_glm))
+results_table <- bind_rows(results_table,data.frame(Method='Combined Results', RMSE = RMSE_combined,Error = AbsError_combined))
+results_table %>% knitr::kable()
+
+```
+
+\newpage
+
+### 3.3 Validation
+
+```{r validation 1}
+val_mon <-predict(fit_mon,validation)
+val_aw <-predict(fit_aw,validation)
+val_swr <-predict(fit_swr,validation)
+
+
+#Club regularization
+club <- train_set %>% group_by(Club) %>%
+  summarize(n=n(),rsum=sum(Overall-mu))
+
+val_club <- validation %>% left_join(club,by='Club')
+val_club <- val_club %>% mutate(b_club=rsum/(n+p_club))
+
+#Jersey Number regularization
+Jersey <- train_set %>% group_by(Jersey.Number) %>%
+  summarize(n=n(),rsum=sum(Overall-mu))
+
+val_jn <- validation %>% left_join(Jersey,by='Jersey.Number')
+val_jn <- val_club %>% mutate(b_jersey=rsum/(n+p_jersey))
+
+#Combine results
+val_b_sum <-  (val_mon + val_aw + val_swr)/3
+
+#With a more powerful computer
+val_glm <-predict(fit_glm,validation)
+val_b_sum <- val_glm
+
+val_b_sum <- val_b_sum+val_club$b_club+val_jn$b_jersey
+
+#Final result
+RMSE_Final <- sqrt(mean((validation$Overall-val_b_sum)^2))
+RMSE_Final
+
+#Final Error
+AbsError_Final <- mean(abs(val_b_sum-validation$Overall))
+AbsError_Final
+
+#Accuracy of prediction
+acc <- round(val_b_sum,0) == validation$Overall
+mean(acc)*100
+
+#Distribution of error
+val_error <- val_b_sum-validation$Overall
+hist(val_error)
+
+```
+
+The final validation was performed on the validation set using the individual models and combined to create the final result. As expected the final result is not as good as the trained model. However the final result is still satisfactory. The accuracy is drops to ~11% on a 99% confidence rating. However, this can once again be attributed by the large number of outliers. 
+
+```{r validation 2, echo=FALSE}
+results_table <- bind_rows(results_table,data.frame(Method='Validation Results', RMSE = RMSE_Final, Error = AbsError_Final))
+results_table %>% knitr::kable()
+```
+
+Therefore the final results can be seen in the table above.
+
+\newpage
+
+## Conclusion
+
+The project goal was to build a model that would predict the overall FIFA ratings of soccer players using only available data and simple to estimate data. The dataset of more than 18000 players and 89 variables was a very good dataset. There were only 60 missing values (0.3%) and only 5 variables required engineering to get into a correct format. Of the 89 variables 17 variables were classified into 4 groups for the model. Upon analysis of the data 10 were chosen for the model. The grouped models had success however, it was the final combined model that was tuned through regularisation which was substantially better than the others. The final results are as follows: 
+
+```{r conclusion, echo=FALSE}
+#Show final table
+results_table %>% knitr::kable()
+```
+
+There was still a large error involved with this kind of model. This is generally due to the inability of the model to predict outliers as can be shown by the high RMSE values. The distribution of errors and the lower mean absolute error show that for values closer to the means the model predicts well. Ultimately this model will give a good idea of the players overall ability but will only serve to inform on the rating. More complex classifiers and building the combined model as a single piece may lead to better results this can be shown when combining all the glm models together. The actual rating will require the complex variables that FIFA uses to give the overall score. 
+
+Note: Without a powerful computer where the full glm suite can be run the validation RMSE is 4.373 with a mean absolute error of 3.470 and accuracy of 9.4%
+
