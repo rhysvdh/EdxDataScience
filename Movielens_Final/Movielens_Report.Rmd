@@ -1,0 +1,1215 @@
+---
+title: "HarvardX Movielens Report"
+author: "Rhys van den Handel"
+date: "27/10/2020"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+```{r, include=FALSE}
+options(tinytex.verbose = TRUE)
+
+##########################################################
+# PACKAGE LOADING
+##########################################################
+
+library(dplyr)
+library(tidyverse)
+library(caret)
+library(data.table)
+library(gsubfn)
+library(stringr)
+```
+
+## Executive Summary
+
+As part of the HarvardX data science certificate, a recommendation system for movies using GroupLens' Movielens 10M dataset was built. The project required an intense data analysis to be conducted. The results of the analysis allowed for a recommendation system to be accurately built. The target for the system was an RMSE of < 0.86490. 
+
+The system was built by separating the 10M dataset into a building set called edx and a validation set. The model was then created by working from simple mean value prediction systems through to more complex regularization. As expected the simple prediction systems resulted in poorer RMSE with the most complex ones getting closer to the target RMSE.
+
+The quality of the data as well as skewing factors such as low numbers of ratings on movies and users rating few movies resulted in higher than expected RMSE values. Cleaner datasets revealed that the approaches used have the ability to accurately predict RMSE values lower than the target.
+The final result on the training data set however only yielded an RMSE of 0.8740286 for the training model. The project was also limited by the size of the dataset and computing power available.
+
+When building the rating system with a data optimized process final RMSE of 0.9200898 was achieved. However, as this does not evaluate outlive in the dataset the final accepted RMSE must be 0.9345861
+
+\newpage
+
+## 1. Introduction
+
+The HarvardX data science certificate takes part over 9 Courses. This is the final Capstone project for all learners. The project is a recommendation system for movies based on the Movielens data. The purpose is to take user given ratings on different movies across many users and movies. The project will then give a prediction on the movie based on the title, and the users prior preference thus recommending a movie.
+
+These systems are common in daily lives. Many streaming services use very similar systems to predict what a user would rate a movie as and therefore recommend high rated movies to the user to encourage more screen time and thus more exposure to the platform and potentially advertising. 
+
+This project looks at many movies and user ratings from the movielens dataset. Ratings will be scored on a scale of 1 to 5 and used to predict a score. This score will be compared against the known hidden score to determine the RMSE which is used to quantify the models performance.
+
+### 1.1 Movielens
+
+The Movielens data science project is has been developed by GroupLens,from the University of Minnesota. There are a few different datasets that have been developed. For this project we will be using the Movielens 10M dataset. Within the dataset we will be looking at 2 specific data sets Ratings.dat and Movies.dat. They are each comprised of the following:
+
+Ratings.dat
+
+*  userId: a unique identifying code allocated to individual users
+*  movieId: a unique identifying code allocated to individual movies
+*  rating: The rating given by the user for a specific movie
+*  timestamp: Time of tagging in seconds since midnight UTC of January 1, 1970
+
+Movies.dat
+
+*  movieId: a unique identifying code allocated to individual movies
+*  title: The title of the movie with (year) of production at the end of the title
+*  genres: All the relevant genres to the movie delimited by a |
+
+### 1.2 Limitations
+
+The size of the datasets means that certain operations cannot be used to run machine learning such as the caret train.
+The machine used was an i7 with 8gb of RAM however this was not sufficient to compute the train matrices which were over 100gb. This limits the analysis to more simple methods such as mean prediction, effect modeling and regularization. Given the computing power restrictions the methodology was decided upon as shown bellow.
+
+### 1.3 Evaluation Method
+
+"The RMSE is a quadratic scoring rule which measures the average magnitude of the error. The equation for the RMSE is given in both of the references. Expressing the formula in words, the difference between forecast and corresponding observed values are each squared and then averaged over the sample. Finally, the square root of the average is taken. Since the errors are squared before they are averaged, the RMSE gives a relatively high weight to large errors. This means the RMSE is most useful when large errors are particularly undesirable." - http://www.eumetrain.org
+
+As well put by eumetrain.org RMSE penalizes high errors. This makes it an ideal evaluation method for recommendation systems. A lower RMSE means that there is a lower likelihood of a very poor recommendation being made which could cause a user to not select the title or worse, leave the application. 
+
+\newpage
+
+## 2. Methodology
+
+The methodology used to evaluate the project is shown and discussed bellow:
+
+### 2.1 Data Import
+
+This initial piece of the project was given and is therefore applicable to all. The purpose is to fetch the data from *http://files.grouplens.org/datasets/movielens/ml-10m.zip*. The data is then split into two separate datasets.
+
+*edx: The Edx dataset contains the 90% of the ratings.dat and movies.dat datasets. They are joined on movieid. The primary purpose of the edx dataset is to build and test the system. We will also be using the edx dataset to perform the data analysis.
+*validation: The validation dataset contains 10% of the ratings.dat and movies.dat datasets joined on movieid. Validation has been semi-joined to ensure all the userid's and movieid's that are present in the validation set are represented in the edx dataset.  
+
+### 2.2 Data Analysis
+
+The data analysis allows for a better understanding of the data components and their interactions. The process of running the data analysis was primarily summarizing into movie and user groups. The key analysis variables were the counts and the ratings. The following was investigated:
+
+1. edx dataset
+  + view the data
+  + check for nulls
+  
+2. Movies (group by movieid)
+  + Summary statistics
+  + Most rated movies
+  + Best rated movies
+  + mean rating by year and number of movies
+  
+3. Users (group by userid)
+  + Summary statistics
+  + Users with most ratings
+  + Users with best ratings
+  + Users with worst ratings
+
+4. Genres (group by genres)
+  + Summary statistics
+  + Genres with most ratings
+  + Genres with best ratings
+  + Genres with worst ratings
+  
+The purpose of the data analysis would be to allow for informed data cleaning decisions that would have a positive outcome on the final results. The data cleaning was used as part of the predictive model as discussed in section 2.3 bellow.
+
+### 2.3 Predictive Model
+
+Due to the limitations discussed in section 1.2 *Limitations* above the predictive model was built with a bottom up complexity method. Therefore the outcome would use the most simple method that would still give an acceptable result.
+
+#### 2.3.1 Splitting Data
+
+
+For each of the key analysis forms the data was split into a training and testing set. The partition is 25% this allows for a large proportion of testing data. If the model can be accurate using a small training proportion to the validation model it is more likely to yield good results at the validation stage.
+
+#### 2.3.2 Prediction Models
+
+
+As introduced the the model will be build from a simple to more complex model:
+
+* Average Model:
+  + Using the simple mean of the dataset
+  
+* Movie Effect:   
+  + Using the grouping of the movie to calculate the mean rating for each movie
+* Movie Regularization:
+  + Using a penalty term on the number of movies to weight the mean
+  + Optimized for the best penalty term
+  
+  
+* User Effect:   
+  + Using the grouping of the users to calculate the mean rating for each user
+* User Regularization:
+  + Using a penalty term on the number of users to weight the mean  
+  + Optimized for the best penalty term
+  
+  
+* Genre Effect:   
+  + Using the grouping of the users to calculate the mean rating for each user
+* Genre Regularization:
+  + Using a penalty term on the number of genres to weight the mean  
+  + Optimized for the best penalty term
+  
+* Combined gene, user and movie regularization:
+  + Using a penalty term on the number of ratings for each  movie as well as the number of ratings for each user and genre to adjust the mean  
+
+
+#### 2.3.3 Iterations
+
+
+The prediction models would be iterated over the default dataset. After the results of the default data have been shown optimization through data cleaning would occur. The order of testing will be:
+
+* Default
+* Limit by median
+
+### 2.4 Validation
+
+
+Once an acceptable RMSE has been identified the final iteration would be the validation, run through the final model.
+
+\newpage
+
+## 3. Results and Discussion
+
+This sections presents the results of the methodology. 
+
+### 3.1 Data Import and Preparation
+
+As stated previously, this piece of code has been provided by the edx team. 
+
+```{r import}
+##########################################################
+# Create edx set, validation set (final hold-out test set)
+##########################################################
+# Note: this process could take a couple of minutes
+
+if(!require(tidyverse)) install.packages("tidyverse", repos = "http://cran.us.r-project.org")
+if(!require(caret)) install.packages("caret", repos = "http://cran.us.r-project.org")
+if(!require(data.table)) install.packages("data.table", repos = "http://cran.us.r-project.org")
+
+library(tidyverse)
+library(caret)
+library(data.table)
+
+# MovieLens 10M dataset:
+# https://grouplens.org/datasets/movielens/10m/
+# http://files.grouplens.org/datasets/movielens/ml-10m.zip
+
+dl <- tempfile()
+download.file("http://files.grouplens.org/datasets/movielens/ml-10m.zip", dl)
+
+ratings <- fread(text = gsub("::", "\t", readLines(unzip(dl, "ml-10M100K/ratings.dat"))),
+                 col.names = c("userId", "movieId", "rating", "timestamp"))
+
+movies <- str_split_fixed(readLines(unzip(dl, "ml-10M100K/movies.dat")), "\\::", 3)
+colnames(movies) <- c("movieId", "title", "genres")
+
+# if using R 4.0 or later:
+movies <- as.data.frame(movies) %>% mutate(movieId = as.numeric(movieId),
+                                           title = as.character(title),
+                                           genres = as.character(genres))
+
+movielens <- left_join(ratings, movies, by = "movieId")
+
+# Validation set will be 10% of MovieLens data
+set.seed(1, sample.kind="Rounding")
+test_index <- createDataPartition(y = movielens$rating, times = 1, p = 0.1, list = FALSE)
+edx <- movielens[-test_index,]
+temp <- movielens[test_index,]
+
+# Make sure userId and movieId in validation set are also in edx set
+validation <- temp %>% 
+  semi_join(edx, by = "movieId") %>%
+  semi_join(edx, by = "userId") %>%
+  semi_join(edx, by = "genres")
+
+# Add rows removed from validation set back into edx set
+removed <- anti_join(temp, validation)
+edx <- rbind(edx, removed)
+
+rm(dl, ratings, movies, test_index, temp, movielens, removed)
+
+```
+
+The edx and Validation datasets were created successfully.
+\newpage
+
+### 3.2 Data Analasis
+
+#### 3.2.1 Edx dataset
+
+```{r edx}
+#View dataset
+head(edx)
+#Check nulls
+any(is.na(edx))
+```
+
+The investigation proved that the columns are presented as expected in the format expected. It also concludes that there are no nulls in the edx dataset. 
+
+#### 3.2.1 Movies
+
+```{r movies1}
+#Create Smaller data sets Average Movie
+mean_movie <- edx %>% group_by(movieId, title, genres) %>%
+  summarize(n=n(), mean_rating=mean(rating))%>%
+  select(movieId, title, genres,n,mean_rating)
+
+#Count number of movies
+nrow(mean_movie)
+
+#movie stats
+summary(mean_movie$n)
+summary(mean_movie$mean_rating)
+```
+
+As shown there are 10677 movies. The summaries have been produced on both the number of ratings per movie and the average rating of each movie.
+
+```{r movies2}
+#10 most rated movies
+mean_movie %>% arrange(desc(n)) %>%
+  top_n(10,n)
+
+#10 best rated movies
+mean_movie %>% arrange(desc(mean_rating)) %>%
+  top_n(10,mean_rating)
+
+#10 best rated movies > 122 ratings (median)
+mean_movie %>% filter(n>122) %>%
+  arrange(desc(mean_rating)) %>%
+  top_n(10,mean_rating)
+```
+
+After looking at the most rated and best rated movies we can see that there is a clear benefit to looking at the movies with a minimum number of ratings to get more accurate and expected results. A breakdown of the movies and average ratings per year can be shown.
+
+```{r movies3, echo=FALSE}
+#pull year from title
+#as.numeric(str_sub(mean_movie$title,-5,-2)) #works to pull year in numeric format
+
+#test on mean movie
+mean_movie %>% mutate(year=as.numeric(str_sub(title,-5,-2)))
+mean_movie <- mean_movie%>% mutate(year=as.numeric(str_sub(title,-5,-2)))
+
+#Apply to edx
+edx_yr<-edx %>% mutate(year=as.numeric(str_sub(title,-5,-2)))
+
+#plot mean ratings by year and number of movies
+mean_movie %>% group_by(year) %>%
+  summarize(yn=n(),yr_mean_rate=mean(mean_rating))%>%
+  ggplot(aes(x=year)) +
+  geom_point(aes(y=yn/100), color="blue") +
+  geom_point(aes(y=yr_mean_rate), color="red")+
+  scale_y_continuous(name = "Mean Rating",sec.axis = sec_axis(~.*100, name="Number Movies"))
+
+```
+
+AS shown there is a larger variation in the movie ratings before 1950 this can be attributed to the low number of ratings. Therefore, it can be concluded that movies before 1950 and movies with less than the median number of reviews may skew the results.
+
+#### 3.2.2 Users
+
+
+```{r user1}
+#Create Smaller data sets Average user
+mean_user <- edx_yr %>% group_by(userId) %>%
+  summarize(n=n(), mean_rating=mean(rating))%>%
+  select(userId,n,mean_rating)
+
+#Count number of users
+nrow(mean_user)
+
+#user stats
+summary(mean_user$n)
+summary(mean_user$mean_rating)
+```
+
+As shown there are 69878 users The summaries have been produced on both the number of ratings per user and the average rating of each user.
+
+```{r user2, echo=FALSE}
+hist(mean_user$n)
+```
+As shown there is a massive skew in that data due to a few users rating a large number of movies. 
+By removing these users we get the following:
+
+```{r user3, echo=FALSE}
+hist(mean_user$n,xlim=c(1,1000),breaks=100)
+```
+
+This more accurately shows the distribution of the users number of ratings.
+
+```{r user4}
+#10 users with most ratings
+mean_user %>% arrange(desc(n)) %>%
+  top_n(10,n)
+
+#10 users with best ratings
+mean_user %>% arrange(desc(mean_rating)) %>%
+  top_n(10,mean_rating)
+
+#10 users with best ratings > 62 ratings (median)
+mean_user %>% filter(n>62) %>%
+  arrange(desc(mean_rating)) %>%
+  top_n(10,mean_rating)
+
+#10 users with worst ratings > 62 ratings (median)
+mean_user %>% filter(n>62) %>%
+  arrange(mean_rating)
+```
+
+After looking at the most rated, best and worst rated users there is a clear benefit to looking at the users with a minimum number of ratings to get more accurate and expected results. This aligns to the movies analysis. 
+
+#### 3.2.3 Genres
+
+```{r genre2}
+#Create Smaller data sets Average Movie
+mean_genre <- edx %>% group_by(genres) %>%
+  summarize(n=n(), mean_rating=mean(rating))%>%
+  select(genres,n,mean_rating)
+
+#Count number of movies
+nrow(mean_genre)
+```
+
+As shown there are 797 genres.
+
+```{r genre3}
+#Create Smaller data sets Average Movie
+#10 most rated genres
+mean_genre %>% arrange(desc(n)) %>%
+  top_n(10,n)
+
+#10 best rated genres
+mean_genre %>% arrange(desc(mean_rating)) %>%
+  top_n(10,mean_rating)
+
+```
+
+There is a clear differentiation between ratings and the associated genres. 
+
+\newpage
+
+### 3.3 Prediction model
+
+Building out the actual prediction model
+
+#### 3.3.1 Default Data
+
+
+Running through the methodology using the default edx dataset with no cleaning of data.
+
+##### 3.3.1.1 Splitting the data
+
+
+Splitting the data into the testing and training data using a 10% split. Importantly a semijoin is used to ensure that the users and movies from the test est exist in the train set.
+
+```{r default1}
+#Create training and test data: Split on a 10% for testing
+set.seed(1, sample.kind = "Rounding")
+test_index <- createDataPartition(edx$rating, times = 1, p = 0.1, list=FALSE)
+
+test_set <- edx[test_index,]
+train_set <- edx[-test_index,]
+
+#Due to regularization issues we need to ensure users and movies in test set are covered in the training set
+
+test_set <- test_set %>% semi_join(train_set, by = "movieId") %>%
+  semi_join(train_set, by = "userId") %>%
+  semi_join(train_set, by = "genres")
+
+nrow(test_set)
+nrow(train_set)
+
+```
+
+##### 3.3.1.2 Simple Average Prediction
+
+Running an RMSE on setting the prediction as the mean of the dataset.
+```{r default2}
+mu <- mean(train_set$rating)
+
+RMSE_mu <- sqrt(mean((test_set$rating-mu)^2))
+RMSE_mu
+
+```
+
+As shown this is still far near the goal RMSE of < 0.86490.
+
+##### 3.3.1.3 Movie Effect Prediction
+
+
+Running an RMSE on setting the prediction as the mean plus the average variation per movie
+
+```{r default3}
+#Create the regularized for sum and mean
+train_movie <- train_set %>% group_by(movieId) %>%
+  summarize(n=n(),rmean=mean(rating-mu),rsum=sum(rating-mu))
+
+
+#Apply to test and training set
+test_movie <- test_set %>% left_join(train_movie,by='movieId')
+
+any(is.na(test_movie))
+any(is.na(train_movie))
+
+#Sample size regularisation accounting for sample size n
+test_movie <- test_movie %>% mutate(reg=rsum/n)
+
+RMSE_mov_nopen <- sqrt(mean((test_set$rating-(mu+test_movie$reg))^2))
+RMSE_mov_nopen
+
+```
+
+This method shows a marked improvement on the average prediction but us still well above the goal RMSE of < 0.86490. AS shown there is no change from the movie effect as this just sum/count results in the average. Therefore, a penalty term is introduced. Finding the optimal penalty term was achieved by initially running large steps for a large range then more accurate steps around the optimized point. 
+
+
+##### 3.3.1.4 Movie Regularization Prediction
+
+
+This method involves regularization of the movie effect. 
+
+```{r default5}
+
+#regularisation optimised with penalty term p
+p <- seq(-10,20,0.5)
+
+#sapply the terms
+RMSEs <- sapply(p,function(p){
+  train_movie <- train_movie %>% mutate(pen=rsum/(n+p))
+  tune_movie <- test_set %>% left_join(train_movie,by='movieId')
+  sqrt(mean((test_set$rating-(mu+tune_movie$pen))^2))
+})
+
+#plot outputs
+plot(p,RMSEs)
+
+#Find optimal penalty term
+pmin_mov <- p[which.min(RMSEs)]
+pmin_mov
+
+#final optimised output
+test_movie <- test_movie %>% mutate(reg=rsum/(n+pmin_mov))
+
+RMSE_mov <- sqrt(mean((test_set$rating-(mu+test_movie$reg))^2))
+RMSE_mov
+```
+
+This method results in a small improvement from the movie effect.
+
+##### 3.3.1.5 User Effect Prediction
+
+
+Running an RMSE on setting the prediction as the mean plus the average variation per user.
+
+```{r default6}
+#Create the regularized for sum and mean
+train_user <- train_set %>% group_by(userId) %>%
+  summarize(n=n(),rmean=mean(rating-mu),rsum=sum(rating-mu))
+
+test_user <- test_set %>% left_join(train_user,by='userId')
+
+any(is.na(test_user)) 
+any(is.na(train_user)) 
+
+
+#Sample size regularization accounting for sample size n
+test_user <- test_user %>% mutate(reg=rsum/n)
+
+RMSE_use_nopen <- sqrt(mean((test_set$rating-(mu+test_user$reg))^2))
+RMSE_use_nopen
+
+```
+
+This method shows a marked improvement on the average prediction but is less effective than the movie effect approach.
+
+
+##### 3.3.1.6 User Regularization Prediction
+
+
+This method involves regularization of the user effect. Once again a penalty term is used and optimized with the same approach as before.
+
+```{r default7}
+
+#regularization optimized with penalty term p
+p <- seq(-10,20)
+
+#sapply the terms
+RMSEs <- sapply(p,function(p){
+  train_user <- train_user %>% mutate(pen=rsum/(n+p))
+  tune_user <- test_set %>% left_join(train_user,by='userId')
+  sqrt(mean((test_set$rating-(mu+tune_user$pen))^2))
+})
+
+#plot outputs
+plot(p,RMSEs)
+
+
+#Improve the accuracy
+p <- seq(2,8,0.1)
+
+#sapply the terms
+RMSEs <- sapply(p,function(p){
+  train_user <- train_user %>% mutate(pen=rsum/(n+p))
+  tune_user <- test_set %>% left_join(train_user,by='userId')
+  sqrt(mean((test_set$rating-(mu+tune_user$pen))^2))
+})
+
+#plot outputs
+plot(p,RMSEs)
+
+pmin_use <- p[which.min(RMSEs)]
+
+#final optimized output
+test_user <- test_user %>% mutate(reg=rsum/(n+pmin_use))
+
+RMSE_use <- sqrt(mean((test_set$rating-(mu+test_user$reg))^2))
+RMSE_use
+
+```
+
+This method results in a small improvement from the user effect but is still higher than the movie effect.
+
+##### 3.3.1.7 Genre Effect Prediction
+
+
+Running an RMSE on setting the prediction as the mean plus the average variation per user.
+
+```{r default8}
+#Create the regularized for sum and mean
+train_genre <- train_set %>% group_by(genres) %>%
+  summarize(n=n(),rmean=mean(rating-mu),rsum=sum(rating-mu))
+
+
+#Apply to test and training set
+test_genre <- test_set %>% left_join(train_genre,by='genres')
+
+any(is.na(test_genre))
+any(is.na(train_genre))
+
+#Sample size regularisation accounting for sample size n
+test_genre <- test_genre %>% mutate(reg=rsum/n)
+
+RMSE_gen_nopen <- sqrt(mean((test_set$rating-(mu+test_genre$reg))^2))
+RMSE_gen_nopen
+
+```
+
+This method shows a very slight improvement on the average prediction but is less effective than the movie and user effect approaches.
+
+
+##### 3.3.1.8 Genre Regularization Prediction
+
+
+This method involves regularization of the genre effect. Once again a penalty term is used and optimized with the same approach as before.
+
+```{r default9}
+
+#regularisation optimised with penalty term p
+p <- seq(-10,20,0.5)
+
+#sapply the terms
+RMSEs <- sapply(p,function(p){
+  train_genre <- train_genre %>% mutate(pen=rsum/(n+p))
+  tune_genre <- test_set %>% left_join(train_genre,by='genres')
+  sqrt(mean((test_set$rating-(mu+tune_genre$pen))^2))
+})
+
+#plot outputs
+plot(p,RMSEs)
+
+#Find optimal peanalty term
+pmin_gen <- p[which.min(RMSEs)]
+
+#final optimised output
+test_genre <- test_genre %>% mutate(reg=rsum/(n+pmin_gen))
+
+RMSE_gen <- sqrt(mean((test_set$rating-(mu+test_genre$reg))^2))
+RMSE_gen
+
+```
+
+This method results in a small improvement from the genre effect but was still higher than both the movie and user effect. This was the least useful model. However, since there was still improvement it was used in the combined model
+
+##### 3.3.1.9 Genre, User and Movie Regularization Prediction Results
+
+
+Combining the genre, user and movie regularization we get the following:
+
+```{r default10}
+
+#Improve the accuracy
+p <- seq(50,150,0.5)
+
+#sapply the terms
+RMSEs <- sapply(p,function(p){
+  train_user <- train_user %>% mutate(pen_u=rsum/(n+p))
+  train_movie <- train_movie %>% mutate(pen_m=rsum/(n+p))
+  train_genre <- train_genre %>% mutate(pen_g=rsum/(n+p))
+  tune_comb <- test_set %>% 
+    left_join(train_user,by='userId') %>% 
+    left_join(train_movie,by='movieId')%>% 
+    left_join(train_genre,by='genres')
+  sqrt(mean((test_set$rating-(mu+tune_comb$pen_u+tune_comb$pen_m+tune_comb$pen_g))^2))
+})
+
+#plot outputs
+plot(p,RMSEs)
+
+pmin_comb <- p[which.min(RMSEs)]
+
+#final optimized output
+test_user <- test_user %>% mutate(reg=rsum/(n+pmin_comb))
+test_movie <- test_movie %>% mutate(reg=rsum/(n+pmin_comb))
+
+RMSE_comb <- sqrt(mean((test_set$rating-(mu+test_user$reg+test_movie$reg))^2))
+RMSE_comb
+```
+
+This is a much better result and is acceptable. However, it is still not below the target RMSE of < 0.86490. Therefore we will look to data cleaning to improve the result.
+
+The final results are as follows:
+```{r default11}
+
+#Build results table
+results_table <- data.frame(Method='Default Mean', RMSE = RMSE_mu)
+results_table <- bind_rows(results_table,data.frame(Method='Default Movie Mean', RMSE = RMSE_mov_nopen))
+results_table <- bind_rows(results_table,data.frame(Method='Default Movie tuned', RMSE = RMSE_mov))
+results_table <- bind_rows(results_table,data.frame(Method='Default User Mean', RMSE = RMSE_use_nopen))
+results_table <- bind_rows(results_table,data.frame(Method='Default User tuned', RMSE = RMSE_use))
+results_table <- bind_rows(results_table,data.frame(Method='Default Genre Mean', RMSE = RMSE_gen_nopen))
+results_table <- bind_rows(results_table,data.frame(Method='Default Genre tuned', RMSE = RMSE_gen))
+results_table <- bind_rows(results_table,data.frame(Method='Default Combined Model', RMSE = RMSE_comb))
+results_table %>% knitr::kable()
+
+summary_table <- data.frame(Method='Default Combined Model', RMSE = RMSE_comb)
+```
+
+There is an improvement in our model. 
+
+\newpage
+
+#### 3.3.2 Median Limited Data
+
+
+Running through the methodology using the cleaned data by median counts.
+
+##### 3.3.2.1 Cleaning and Splitting the data
+
+
+The data will be cleaned using the median count of n=122 for movies and n=62 for users. Splitting the data into the testing and training data using a 10% split. Importantly a semi-join is used to ensure that the users and movies from the test est exist in the train set.
+
+```{r median1}
+
+#---- Limit movies users and genres by median ----
+
+#Get the mean counts
+edx_movie <- edx %>% group_by(movieId) %>%
+  summarize(n=n())
+
+edx_user <- edx %>% group_by(userId) %>%
+  summarize(n=n())
+
+edx_genre <- edx %>% group_by(genres) %>%
+  summarize(n=n())
+
+median_mov_n <- median(edx_movie$n)
+median_use_n <- median(edx_user$n)
+median_gen_n <- median(edx_genre$n)
+
+#Limit the by the mean
+
+lim_movie <- edx_movie %>% filter(n>median_mov_n)
+lim_user <- edx_user %>% filter(n>median_use_n)
+lim_genre <- edx_genre %>% filter(n>median_gen_n)
+
+#Apply to edx
+lim_edx <- edx %>% semi_join(lim_movie, by = "movieId") %>%
+  semi_join(lim_user, by = "userId") %>%
+  semi_join(lim_genre, by = "genres")
+
+
+head(lim_edx)
+nrow(lim_edx)
+
+
+#Create training and test data: Split on a 10% for testing
+set.seed(1, sample.kind = "Rounding")
+lim_test_index <- createDataPartition(lim_edx$rating, times = 1, p = 0.1, list=FALSE)
+
+lim_test_set <- lim_edx[lim_test_index,]
+lim_train_set <- lim_edx[-lim_test_index,]
+
+#Due to regularization issues we need to ensure users and movies in test set are covered in the training set
+
+lim_test_set <- lim_test_set %>% semi_join(lim_train_set, by = "movieId") %>%
+  semi_join(lim_train_set, by = "userId") %>%
+  semi_join(lim_train_set, by = "genres")
+
+nrow(lim_test_set)
+nrow(lim_train_set)
+
+```
+
+##### 3.3.2.2 Simple Average Prediction
+
+
+Running an RMSE on setting the prediction as the mean of the dataset.
+
+```{r median2}
+mu <- mean(lim_train_set$rating)
+
+RMSE_mu <- sqrt(mean((lim_test_set$rating-mu)^2))
+RMSE_mu
+
+```
+
+Already there is an improvement towards the goal of < 0.86490.
+
+##### 3.3.2.3 Movie Effect Prediction
+
+
+Running an RMSE on setting the prediction as the mean plus the average variation per movie
+
+```{r median3}
+#Create the regularized for sum and mean
+train_movie <- lim_train_set %>% group_by(movieId) %>%
+  summarize(n=n(),rmean=mean(rating-mu),rsum=sum(rating-mu))
+
+
+#Apply to test and training set
+test_movie <- lim_test_set %>% left_join(train_movie,by='movieId')
+
+any(is.na(test_movie))
+any(is.na(train_movie))
+
+#Sample size regularisation accounting for sample size n
+test_movie <- test_movie %>% mutate(reg=rsum/n)
+
+RMSE_mov_nopen <- sqrt(mean((lim_test_set$rating-(mu+test_movie$reg))^2))
+RMSE_mov_nopen
+
+```
+
+This method shows an improvement on the average prediction but is still above the goal RMSE of < 0.86490.
+
+
+##### 3.3.2.4 Movie Regularization Prediction
+
+
+This method involves regularization of the movie effect. Optimizing a penalty term using the same method as before.
+
+```{r median4}
+
+#regularisation optimised with penalty term p
+p <- seq(-10,20,0.5)
+
+#sapply the terms
+RMSEs <- sapply(p,function(p){
+  train_movie <- train_movie %>% mutate(pen=rsum/(n+p))
+  tune_movie <- lim_test_set %>% left_join(train_movie,by='movieId')
+  sqrt(mean((lim_test_set$rating-(mu+tune_movie$pen))^2))
+})
+
+#plot outputs
+plot(p,RMSEs)
+
+#Find optimal peanalty term
+pmin_mov <- p[which.min(RMSEs)]
+
+#final optimised output
+test_movie <- test_movie %>% mutate(reg=rsum/(n+pmin_mov))
+
+RMSE_mov <- sqrt(mean((lim_test_set$rating-(mu+test_movie$reg))^2))
+RMSE_mov
+```
+
+This method results in a small improvement from the movie effect. and an improvement when compared to the initial default data run
+
+##### 3.3.2.5 User Effect Prediction
+
+
+Running the RMSE on setting the prediction as the mean plus the average variation per user.
+
+```{r median5}
+#Create the regularized for sum and mean
+train_user <- lim_train_set %>% group_by(userId) %>%
+  summarize(n=n(),rmean=mean(rating-mu),rsum=sum(rating-mu))
+
+test_user <- lim_test_set %>% left_join(train_user,by='userId')
+
+any(is.na(test_user)) 
+any(is.na(train_user)) 
+
+
+#Sample size regularization accounting for sample size n
+test_user <- test_user %>% mutate(reg=rsum/n)
+
+RMSE_use_nopen <- sqrt(mean((lim_test_set$rating-(mu+test_user$reg))^2))
+RMSE_use_nopen
+
+```
+
+This method shows an improvement from the default run but still performs worse than the default movie effect approach.
+
+
+##### 3.3.2.6 User Regularization Prediction
+
+
+This method involves regularization of the user effect. Once again a penalty term is used and optimized with the same approach as before.
+
+```{r median6}
+
+#regularization optimized with penalty term p
+p <- seq(-10,20,0.5)
+
+#sapply the terms
+RMSEs <- sapply(p,function(p){
+  train_user <- train_user %>% mutate(pen=rsum/(n+p))
+  tune_user <- lim_test_set %>% left_join(train_user,by='userId')
+  sqrt(mean((lim_test_set$rating-(mu+tune_user$pen))^2))
+})
+
+#plot outputs
+plot(p,RMSEs)
+
+pmin_use <- p[which.min(RMSEs)]
+
+#final optimized output
+test_user <- test_user %>% mutate(reg=rsum/(n+pmin_use))
+
+RMSE_use <- sqrt(mean((lim_test_set$rating-(mu+test_user$reg))^2))
+RMSE_use
+```
+
+##### 3.3.2.7 Genre Effect Prediction
+
+
+Running the RMSE on setting the prediction as the mean plus the average variation per genre.
+
+```{r median7}
+#Create the regularized for sum and mean
+train_genre <- lim_train_set %>% group_by(genres) %>%
+  summarize(n=n(),rmean=mean(rating-mu),rsum=sum(rating-mu))
+
+
+#Apply to test and training set
+test_genre <- lim_test_set %>% left_join(train_genre,by='genres')
+
+any(is.na(test_genre))
+any(is.na(train_genre))
+
+#Sample size regularisation accounting for sample size n
+test_genre <- test_genre %>% mutate(reg=rsum/n)
+
+RMSE_gen_nopen <- sqrt(mean((lim_test_set$rating-(mu+test_genre$reg))^2))
+RMSE_gen_nopen
+
+```
+
+This method shows an improvement from the default run but still performs worse than the default movie and user effect approaches.
+
+
+##### 3.3.2.8 Genre Regularization Prediction
+
+
+This method involves regularization of the user effect. Once again a penalty term is used and optimized with the same approach as before.
+
+```{r median8}
+
+#regularisation optimised with penalty term p
+p <- seq(-10,20,0.5)
+
+#sapply the terms
+RMSEs <- sapply(p,function(p){
+  train_genre <- train_genre %>% mutate(pen=rsum/(n+p))
+  tune_genre <- lim_test_set %>% left_join(train_genre,by='genres')
+  sqrt(mean((lim_test_set$rating-(mu+tune_genre$pen))^2))
+})
+
+#plot outputs
+plot(p,RMSEs)
+
+#Find optimal peanalty term
+pmin_gen <- p[which.min(RMSEs)]
+
+#final optimised output
+test_genre <- test_genre %>% mutate(reg=rsum/(n+pmin_gen))
+
+RMSE_gen <- sqrt(mean((lim_test_set$rating-(mu+test_genre$reg))^2))
+RMSE_gen
+```
+
+Similarly there is improvement but it is very small. Genre remains the poorest performing model.
+
+##### 3.3.2.9 Genre, User and Movie Regularization Prediction
+
+
+Combining the genre, user and movie regularization we get the following:
+
+```{r median9}
+
+#Improve the accuracy
+p <- seq(75,150,1)
+
+#sapply the terms
+RMSEs <- sapply(p,function(p){
+  train_user <- train_user %>% mutate(pen_u=rsum/(n+p))
+  train_movie <- train_movie %>% mutate(pen_m=rsum/(n+p))
+  train_genre <- train_genre %>% mutate(pen_g=rsum/(n+p))
+  tune_comb <- lim_test_set %>% 
+    left_join(train_user,by='userId') %>% 
+    left_join(train_movie,by='movieId')%>% 
+    left_join(train_genre,by='genres')
+  sqrt(mean((lim_test_set$rating-(mu+tune_comb$pen_u+tune_comb$pen_m+tune_comb$pen_g))^2))
+})
+
+#plot outputs
+plot(p,RMSEs)
+
+pmin_comb_lim <- p[which.min(RMSEs)]
+
+#final optimized output
+test_user <- test_user %>% mutate(reg=rsum/(n+pmin_comb_lim))
+test_movie <- test_movie %>% mutate(reg=rsum/(n+pmin_comb_lim))
+
+RMSE_comb <- sqrt(mean((lim_test_set$rating-(mu+test_user$reg+test_movie$reg))^2))
+RMSE_comb
+```
+
+This is a much better result and a step better than the default approach. However, it is still not below the target RMSE of < 0.86490. This means that in order to recommend a good enough system it would be best to recommend movies that have more than the median of the number of ratings. This means that small niche shows and movies will likely get removed. However, It would push for more watched movies to be seen. 
+
+There can still be other effects that are skewing the data. The processing power limitation now forms a serious block as the model cannot be made any more complex.
+The results are now as follows:
+
+```{r median10}
+
+#Append to results table
+results_table <- bind_rows(results_table,data.frame(Method='Limited Mean', RMSE = RMSE_mu))
+results_table <- bind_rows(results_table,data.frame(Method='Limited Movie Mean', RMSE = RMSE_mov_nopen))
+results_table <- bind_rows(results_table,data.frame(Method='Limited Movie tuned', RMSE = RMSE_mov))
+results_table <- bind_rows(results_table,data.frame(Method='Limited User Mean', RMSE = RMSE_use_nopen))
+results_table <- bind_rows(results_table,data.frame(Method='Limited User tuned', RMSE = RMSE_use))
+results_table <- bind_rows(results_table,data.frame(Method='Limited Genre Mean', RMSE = RMSE_gen_nopen))
+results_table <- bind_rows(results_table,data.frame(Method='Limited Genre tuned', RMSE = RMSE_gen))
+results_table <- bind_rows(results_table,data.frame(Method='Limited Combined Model', RMSE = RMSE_comb))
+results_table %>% knitr::kable()
+```
+
+\newpage
+
+### 3.4 Validation
+
+#### 3.4.1 Default Dataset
+
+
+Run the validation using the method lined out without data cleaning. To show the pure results of the model.
+
+```{r valid1, echo=FALSE}
+#Get mean
+mu <- mean(edx$rating)
+mu
+
+##########################################################
+# VALID DEFAULT: - MOVIE EFFECT
+##########################################################
+
+#Create the regularized for sum and mean
+train_movie <- edx %>% group_by(movieId) %>%
+  summarize(n=n(),rmean=mean(rating-mu),rsum=sum(rating-mu))
+
+val_movie <- validation %>% left_join(train_movie,by='movieId')
+any(is.na(val_movie))
+
+#Sample size regularization accounting for sample size n
+val_movie <- val_movie %>% mutate(reg=rsum/(n+pmin_comb))
+
+##########################################################
+# VALID DEFAULT: - USER EFFECT
+##########################################################
+
+#Create the regularized for sum and mean
+train_user <- edx %>% group_by(userId) %>%
+  summarize(n=n(),rmean=mean(rating-mu),rsum=sum(rating-mu))
+
+val_user <- validation %>% left_join(train_user,by='userId')
+any(is.na(val_user))
+
+#Sample size regularization accounting for sample size n
+val_user <- val_user %>% mutate(reg=rsum/(n+pmin_comb))
+
+##########################################################
+# VALID DEFAULT: - GENRE EFFECT
+##########################################################
+
+#Create the regularized for sum and mean
+train_genre <- edx %>% group_by(genres) %>%
+  summarize(n=n(),rmean=mean(rating-mu),rsum=sum(rating-mu))
+
+val_genre <- validation %>% left_join(train_genre,by='genres')
+any(is.na(val_genre))
+
+#Sample size regularization accounting for sample size n
+val_genre <- val_genre %>% mutate(reg=rsum/(n+pmin_comb))
+
+##########################################################
+# VALID DEFAULT: RMSE - REGULARIZATION USER AND MOVIE EFFECT
+##########################################################
+
+```
+
+```{r valid2}
+#Final validated RMSE
+RMSE_Val <- sqrt(mean((validation$rating-(mu+val_user$reg+val_movie$reg +val_genre$reg))^2))
+RMSE_Val
+
+
+#Append to results tables
+results_table <- bind_rows(results_table,data.frame(Method='Default Validation', RMSE = RMSE_Val))
+summary_table <- bind_rows(summary_table,data.frame(Method='Default Validation', RMSE = RMSE_Val))
+
+```
+
+This shows a very respectable final RMSE. However, this is above the target RMSE of  0.86490. Knowing that data issues form part of this. If chosen to only report on the items with more ratings than the mean number of ratings, this can improve the accuracy of the results.
+
+\newpage
+
+#### 3.4.2 Final Output
+
+The final output using cleaner data
+
+##### 3.4.2.1 Cleaner data
+
+
+Cleaning the data by mean number of ratings for both movies and users. A limit is applied to the validation set essentially throwing out the unique and different values that could negatively influence the recommendation.
+
+```{r valid3}
+##########################################################
+# VALID CLEAN: - CLEAN DATA
+##########################################################
+#Get the mean counts
+edx_movie <- edx %>% group_by(movieId) %>%
+  summarize(n=n())
+
+edx_user <- edx %>% group_by(userId) %>%
+  summarize(n=n())
+
+edx_genre <- edx %>% group_by(genres) %>%
+  summarize(n=n())
+
+median_mov_n <- median(edx_movie$n)
+median_use_n <- median(edx_user$n)
+median_gen_n <- median(edx_genre$n)
+
+#Limit the by the mean
+
+lim_movie <- edx_movie %>% filter(n>median_mov_n)
+lim_user <- edx_user %>% filter(n>median_use_n)
+lim_genre <- edx_genre %>% filter(n>median_gen_n)
+
+#Apply to edx
+lim_edx <- edx %>% semi_join(lim_movie, by = "movieId") %>%
+  semi_join(lim_user, by = "userId") %>%
+  semi_join(lim_genre, by = "genres")
+
+
+lim_valid <- validation %>% semi_join(lim_edx, by = "movieId") %>%
+  semi_join(lim_edx, by = "userId") %>%
+  semi_join(lim_edx, by = "genres")
+
+any(is.na(lim_valid))
+```
+
+There are no NA's therefore the dataset is good.
+
+##### 3.4.2.2 Final RMSE
+
+
+Running the code as per the same method as above.
+
+```{r valid4, echo=FALSE}
+##########################################################
+# VALID CLEAN: - MOVIE EFFECT
+##########################################################
+
+#Get mean
+mu <- mean(lim_edx$rating)
+
+#Create the regularized for sum and mean
+train_movie <- lim_edx %>% group_by(movieId) %>%
+  summarize(n=n(),rmean=mean(rating-mu),rsum=sum(rating-mu))
+
+
+val_movie <- lim_valid %>% left_join(train_movie,by='movieId')
+any(is.na(val_movie))
+
+#Sample size regularization accounting for sample size n
+val_movie <- val_movie %>% mutate(reg=rsum/(n+pmin_comb_lim))
+
+##########################################################
+# VALID CLEAN: - USER EFFECT
+##########################################################
+
+#Create the regularized for sum and mean
+train_user <- lim_edx %>% group_by(userId) %>%
+  summarize(n=n(),rmean=mean(rating-mu),rsum=sum(rating-mu))
+
+val_user <- lim_valid %>% left_join(train_user,by='userId')
+any(is.na(val_user))
+
+#Sample size regularization accounting for sample size n
+val_user <- val_user %>% mutate(reg=rsum/(n+pmin_comb_lim))
+
+##########################################################
+# VALID CLEAN: - GENRE EFFECT
+##########################################################
+
+#Create the regularized for sum and mean
+train_genre <- lim_edx %>% group_by(genres) %>%
+  summarize(n=n(),rmean=mean(rating-mu),rsum=sum(rating-mu))
+
+val_genre <- lim_valid %>% left_join(train_genre,by='genres')
+any(is.na(val_genre))
+
+#Sample size regularization accounting for sample size n
+val_genre <- val_genre %>% mutate(reg=rsum/(n+pmin_comb_lim))
+```
+
+```{r valid5}
+##########################################################
+# VALID CLEAN: RMSE - REGULARIZATION USER AND MOVIE EFFECT
+##########################################################
+
+#Final validated RMSE
+RMSE_Val <- sqrt(mean((lim_valid$rating-(mu+val_user$reg+val_movie$reg +val_genre$reg))^2))
+RMSE_Val
+
+#Rated Items:
+nrow(lim_valid)/nrow(validation)
+
+#Append to results table
+results_table <- bind_rows(results_table,data.frame(Method='Limited Validation', RMSE = RMSE_Val))
+summary_table <- bind_rows(summary_table,data.frame(Method='Limited Validation', RMSE = RMSE_Val))
+```
+
+The final RMSE is an improvement from the mean estimation. which is well below the target of <  0.86490. This is a very positive result. However only 82% of the validation set has been evaluated. Therefore the high accuracy comes at a very large cost.
+
+The final results are therefore:
+
+
+```{r valid6,echo=FALSE}
+results_table %>% knitr::kable()
+```
+
+\newpage
+
+## 4. Conclusion
+
+The quality of the data as well as skewing factors such as low numbers of ratings on movies and users rating few movies resulted in higher than expected RMSE values. Cleaner datasets revealed that the approaches used have the ability to predict better RMSE values but not lower than the target.
+
+When building the rating system with a data optimized process an RMSE of lower than the default was achieved. However, as this does not evaluate outliers in the dataset the final accepted RMSE must be the default RMSE as shown below:
+
+```{r conc,echo=FALSE}
+summary_table %>% knitr::kable()
+```
+
+Therefore the final RMSE is worse than the target which is a poor outcome. The model is not sufficient. The RMSE metric is optimized as best achievable with the data available but can be improved with more complex classifiers, for example K Nearest Neighbors approach. This project was limited by the large size of the dataset and not enough computing power. 
+
+
